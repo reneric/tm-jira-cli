@@ -1,0 +1,59 @@
+#!/bin/sh
+
+if [ "$DEBUG" = "yes" ]; then
+    set -x
+fi
+set -e
+
+export TM_ISSUE_VERSION="0.3.6"
+export TM_ISSUE_CACHE_DIR=${TM_ISSUE_CACHE_DIR:-"$HOME/.tmissue"}
+export TM_ISSUE_CACHE_EXPIRATION=${TM_ISSUE_CACHE_EXPIRATION:-30}
+
+# The sed expression here replaces all backslashes by forward slashes.
+# This helps our Windows users, while not bothering our Unix users.
+export TM_ISSUE_DIR=$(dirname "$(echo "$0" | sed -e 's,\\,/,g')")
+
+usage() {
+    cat <<USAGE
+usage: tm task:<subcommand>
+
+Available subcommands are:
+   start    Create a new task branch & set status to 'In Progress'
+   finish   Merge task branch & set status to 'Resolved'
+USAGE
+}
+
+main() {
+    if [ "$#" -lt 1 ]; then
+        usage; exit 1
+    fi
+
+    source "$TM_ISSUE_DIR/tm-issue-common"
+    local subcommand=$(echo "$1" | sed -e "s/^task://"); shift
+    case $subcommand in
+        "-h"|"--help"|"help")
+            usage; exit 0
+            ;;
+        "-v"|"--version")
+            subcommand="version"
+            ;;
+    esac
+
+    if [ ! -e "$TM_ISSUE_DIR/tm-issue-$subcommand" ]; then
+        usage; exit 1
+    fi
+    source "$TM_ISSUE_DIR/tm-issue-$subcommand"
+
+    case $1 in
+        "-h"|"--help"|"help")
+            subcommand="help"
+            ;;
+    esac
+
+    if [ ! type "cmd_$subcommand" >/dev/null 2>&1 ]; then
+        usage; exit 1
+    fi
+    cmd_$subcommand "$@"
+}
+
+main "$@"

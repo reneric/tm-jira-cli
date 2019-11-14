@@ -1,0 +1,107 @@
+#!/bin/sh
+
+function usage() {
+    cat <<USAGE
+usage: tm task:finish [<issuekey>] [-H]
+
+Arguments:
+    <issuekey>  The Jira key for the issue to work on.
+
+Options:
+    -H          Finish a hotfix branch.
+
+Examples:
+    # Finish the current working branch:
+    $ tm task:finish
+
+    # Finish a branch for the given issue key:
+    $ tm task:finish WEB-12
+
+    # Finish a hotfix branch:
+    $ tm task:finish -H
+
+    # -H is not required if the name of the current
+    # branch starts with an '!'
+    $ tm branch
+      master
+    * !WEB-12/cleanup
+    $ tm task:finish
+USAGE
+}
+
+function cmd_finish() {
+    parse_args "$@"
+    local branch="$BRANCH_NAME"
+    local hotfix="$HOTFIX"
+
+    if [[ -n "$branch" ]]; then
+        check_jira_key "$branch"
+        local branch_name=$(git_issue_branch $branch)
+        test -n "$branch_name" || fail "Issue '$branch' is not currently being worked on"
+        branch="$branch_name"
+    else
+        branch=$(git_current_branch)
+    fi
+
+    local issue_key=${branch%/*}
+    if [[ ${issue_key:0:1} == "!" ]]; then
+        hotfix=true
+        issue_key=${issue_key:1}
+    fi
+
+    login_jira
+    check_jira_key "$issue_key"
+
+    if [[ -n "$hotfix" ]]; then
+        start_branch="$JIRA_MASTER_BRANCH"
+        remote="$JIRA_MASTER_REMOTE"
+    else
+        start_branch="$JIRA_DEVELOPMENT_BRANCH"
+        remote="$JIRA_DEVELOPMENT_REMOTE"
+    fi
+
+    local commit_message=$(compose_commit_message $issue_key $branch $start_branch)
+
+    puts_step "Finishing branch: $branch"
+    git checkout "$start_branch"
+    git pull "$remote" "$start_branch" 2>/dev/null
+    git merge --no-ff "$branch" -m "$commit_message"
+    git branch -d "$branch"
+    git push "$remote" "$start_branch" 2>/dev/null
+
+    puts_step "Updating issue: $issue_key"
+    $JIRA_CLI --server "$JIRA_SERVER" --user "$JIRA_USER" --password "$JIRA_LOGIN_TOKEN" -a transitionIssue --issue "$issue_key" --transition "QA"
+
+    if [[ -n "$hotfix" ]]; then
+        local rebase_branch="$JIRA_DEVELOPMENT_BRANCH"
+        local rebase_origin="$JIRA_DEVELOPMENT_REMOTE"
+        puts_step "Rebasing branch: $rebase_branch"
+        git checkout "$rebase_branch"
+        git pull "$rebase_origin" "$rebase_branch" 2>/dev/null
+        git rebase "$start_branch"
+        git push -f "$rebase_origin" "$rebase_branch" 2>/dev/null
+    fi
+}
+
+function cmd_help() {
+    usage
+    exit 0
+}
+
+function parse_args() {
+    while (( "$#" )); do
+        local arg="$1"; shift
+        case $arg in
+            -H)
+                HOTFIX=true;;
+            *)
+                if [[ -z "$BRANCH_NAME" ]]; then
+                    BRANCH_NAME="$arg"
+                else
+                    usage
+                    exit 1
+                fi
+                ;;
+        esac
+    done
+}

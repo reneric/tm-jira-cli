@@ -1,0 +1,95 @@
+#!/bin/sh
+
+function usage() {
+    cat <<USAGE
+usage: tm task:start [<issuekey>] [-b <branchname>] [-H]
+
+Arguments:
+    <issuekey>       The Jira key for the issue to work on.
+
+Options:
+    -b <branchname>  The descriptive name of the branch.
+    -H               Start a hotfix branch.
+
+Examples:
+    # Start working on WEB-12. The descriptive name
+    # will be generated from the Jira issue summary.
+    $ tm task:start WEB-12
+
+    # Start working on a hotfix branch:
+    $ tm task:start WEB-12 -H
+
+    # Specify the descriptive name of the branch:
+    $ tm task:start WEB-12 -b cleanup
+
+    # Or this will do the same thing:
+    $ tm task:start WEB-12/cleanup
+USAGE
+}
+
+function cmd_start() {
+    if [ "$#" -lt 1 ]; then
+        usage; exit 1
+    fi
+
+    local issue=(${1//\// }); shift
+
+    parse_opts "$@"
+    login_jira
+    local issue_key=${issue[0]}
+    local issue_name=${issue[1]}
+    local issue_summary
+    local issue_branch
+    local start_branch
+    local remote
+    check_jira_key "$issue_key"
+
+    puts_step "Starting issue: $issue_key"
+
+
+    issue_summary=$(get_jira_summary "$issue_key")
+    if [[ -z "$issue_name" ]]; then
+        issue_name="$BRANCH_NAME"
+    fi
+    if [[ -z "$issue_name" ]]; then
+        issue_name=${issue_summary// /_}
+    fi
+    issue_branch="$issue_key/$issue_name"
+
+    if [[ -n "$HOTFIX" ]]; then
+        issue_branch="!$issue_branch"
+        start_branch="$JIRA_MASTER_BRANCH"
+        remote="$JIRA_MASTER_REMOTE"
+    else
+        start_branch="$JIRA_DEVELOPMENT_BRANCH"
+        remote="$JIRA_DEVELOPMENT_REMOTE"
+    fi
+
+    puts_step "Creating branch: $issue_branch from '$start_branch'"
+    git checkout "$start_branch"
+    git pull "$remote" "$start_branch" 2>/dev/null
+    git checkout -b "$issue_branch" "$start_branch"
+
+    puts_step "Updating issue: $issue_key"
+    $JIRA_CLI --server "$JIRA_SERVER" --user "$JIRA_USER" --password "$JIRA_LOGIN_TOKEN" -a transitionIssue --issue "$issue_key" --transition "In Progress"
+    $JIRA_CLI --server "$JIRA_SERVER" --user "$JIRA_USER" --password "$JIRA_LOGIN_TOKEN" -a updateIssue --issue "$issue_key" --assignee "$JIRA_USER" >/dev/null
+}
+
+function cmd_help() {
+    usage
+    exit 0
+}
+
+function parse_opts() {
+    while getopts ":Hb:" option
+    do
+        case "$option" in
+            H)
+                HOTFIX=true;;
+            b)
+                BRANCH_NAME="$OPTARG";;
+            \?)
+                usage; exit 1;;
+        esac
+    done
+}

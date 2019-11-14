@@ -1,0 +1,14 @@
+#!/bin/sh
+
+function usage() {
+  echo "usage: tm task:version"
+}
+
+function cmd_version() {
+  echo "$TM_ISSUE_VERSION"
+}
+
+function cmd_help() {
+  usage
+  exit 0
+}
