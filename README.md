@@ -1,4 +1,4 @@
-tm-jira-cli
+Tastemade Jira CLI
 =============
 
 A CLI for Tastemade that extends Git and Jira CLIs.
